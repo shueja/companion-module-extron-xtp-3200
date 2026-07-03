@@ -3,10 +3,12 @@ const { runEntrypoint, InstanceBase, Regex, combineRgb, InstanceStatus } = requi
 
 const XTP_MAX_INPUTS = 32
 const XTP_MAX_OUTPUTS = 32
-const DEFAULT_TIE_POLL_PERIOD_SECONDS = 30
+const DEFAULT_TIE_POLL_PERIOD_SECONDS = 120
+const MIN_TIE_POLL_PERIOD_SECONDS = 120
 const VERBOSE_MODE_COMMAND = 'W3CV|'
 const DEFAULT_TIE_STATUS_QUERY_SUFFIX = '&'
 const FEEDBACK_TIE_EXISTS = 'tie_exists'
+const ENABLE_TIE_POLLING = true
 
 class ExtronXtpInstance extends InstanceBase {
 	constructor(internal) {
@@ -21,6 +23,8 @@ class ExtronXtpInstance extends InstanceBase {
 		this.outputRouteState = {}
 		this.verboseModeSet = false
 		this.lastVerboseModeRequest = 0
+		this.pendingTieResponseLog = undefined
+		this.nextTiePollOutput = 1
 
 		this.CHOICES_TYPE = [
 			{ label: 'Audio & Video', id: '!' },
@@ -84,7 +88,7 @@ class ExtronXtpInstance extends InstanceBase {
 	}
 
 	getTieStatusQueryCommand(output) {
-		// SIS "View RGBHV output tie" query: X30#&
+		// SIS "View RGBHV output tie" query: #&
 		return `${output}${DEFAULT_TIE_STATUS_QUERY_SUFFIX}`
 	}
 
@@ -247,48 +251,9 @@ class ExtronXtpInstance extends InstanceBase {
 					const output = Number(action.options.output)
 					const type = action.options.type || '!'
 					if (!Number.isInteger(input) || !Number.isInteger(output)) return
-					this.sendCommand(`${input}*${output}${type}`)
-				},
-			},
-			inputToAll: {
-				name: 'Route input to all outputs',
-				options: [
-					{
-						type: 'dropdown',
-						label: 'Input',
-						id: 'input',
-						choices: inputChoices,
-						default: inputChoices[0]?.id || '1',
-					},
-					{
-						type: 'dropdown',
-						label: 'Type',
-						id: 'type',
-						choices: this.CHOICES_TYPE,
-						default: '!',
-					},
-				],
-				callback: async (action) => {
-					const input = Number(action.options.input)
-					const type = action.options.type || '!'
-					if (!Number.isInteger(input)) return
-					this.sendCommand(`${input}*${type}`)
-				},
-			},
-			recall: {
-				name: 'Recall preset',
-				options: [
-					{
-						type: 'textinput',
-						label: 'Preset',
-						id: 'preset',
-						regex: Regex.NUMBER,
-					},
-				],
-				callback: async (action) => {
-					const preset = Number(action.options.preset)
-					if (!Number.isInteger(preset)) return
-					this.sendCommand(`WR${preset}PRST|`)
+					const command = `${input}*${output}${type}`
+					this.log('info', `Routing command sent: input ${input} -> output ${output} (${type}), SIS: ${command}`)
+					this.sendCommand(command)
 				},
 			},
 		}
@@ -359,57 +324,6 @@ class ExtronXtpInstance extends InstanceBase {
 									input: '1',
 									output: '1',
 									type: '!',
-								},
-							},
-						],
-						up: [],
-					},
-				],
-				feedbacks: [],
-			},
-			inputToAll: {
-				type: 'button',
-				category: 'Route',
-				name: 'Input to all outputs',
-				style: {
-					text: 'Route all',
-					size: '18',
-					color: combineRgb(255, 255, 255),
-					bgcolor: combineRgb(0, 0, 0),
-				},
-				steps: [
-					{
-						down: [
-							{
-								actionId: 'inputToAll',
-								options: {
-									input: '1',
-									type: '!',
-								},
-							},
-						],
-						up: [],
-					},
-				],
-				feedbacks: [],
-			},
-			recall: {
-				type: 'button',
-				category: 'Presets',
-				name: 'Recall global preset',
-				style: {
-					text: 'Recall preset',
-					size: '18',
-					color: combineRgb(255, 255, 255),
-					bgcolor: combineRgb(0, 0, 0),
-				},
-				steps: [
-					{
-						down: [
-							{
-								actionId: 'recall',
-								options: {
-									preset: '1',
 								},
 							},
 						],
@@ -533,6 +447,29 @@ class ExtronXtpInstance extends InstanceBase {
 		return true
 	}
 
+	logRawTieResponse(data) {
+		if (!this.pendingTieResponseLog) {
+			return
+		}
+
+		if (Date.now() > this.pendingTieResponseLog.expiresAt) {
+			this.pendingTieResponseLog = undefined
+			return
+		}
+
+		if (this.pendingTieResponseLog.logged === true) {
+			return
+		}
+
+		const rawLine = String(data)
+		if (rawLine.length === 0) {
+			return
+		}
+
+		this.log('info', `Tie raw response received after command ${this.pendingTieResponseLog.command}: ${rawLine}`)
+		this.pendingTieResponseLog.logged = true
+	}
+
 	processFeedbackLine(line) {
 		if (this.handleVerboseModeFeedback(line)) {
 			return
@@ -622,18 +559,28 @@ class ExtronXtpInstance extends InstanceBase {
 			this.login = true
 			this.updateStatus(InstanceStatus.Ok)
 			this.enableVerboseMode()
-		} else {
+		}
+		else {
+			this.logRawTieResponse(data)
 			this.processFeedbackData(data)
 		}
 
 		if (this.login === true) {
-			this.startHeartbeat()
-			this.startTieStatePoll()
+			if (this.heartbeatInterval === undefined) {
+				this.startHeartbeat()
+			}
+
+			if (this.tiePollInterval === undefined) {
+				this.startTieStatePoll()
+			}
 		}
 	}
 
 	startHeartbeat() {
-		this.stopHeartbeat()
+		if (this.heartbeatInterval !== undefined) {
+			return
+		}
+
 		this.heartbeatInterval = setInterval(() => {
 			this.login = false
 			this.updateStatus(InstanceStatus.Connecting, 'Checking connection')
@@ -649,9 +596,15 @@ class ExtronXtpInstance extends InstanceBase {
 	}
 
 	startTieStatePoll() {
-		this.stopTieStatePoll()
+		if (this.tiePollInterval !== undefined) {
+			return
+		}
 
-		const pollPeriodSeconds = this.getConfiguredTiePollPeriodSeconds()
+		if (!ENABLE_TIE_POLLING) {
+			return
+		}
+
+		const pollPeriodSeconds = Math.max(this.getConfiguredTiePollPeriodSeconds(), MIN_TIE_POLL_PERIOD_SECONDS)
 		if (pollPeriodSeconds <= 0) {
 			return
 		}
@@ -668,10 +621,25 @@ class ExtronXtpInstance extends InstanceBase {
 	}
 
 	pollTieStateNow() {
-		const maxOutputs = this.getConfiguredOutputCount()
+		if (!ENABLE_TIE_POLLING) {
+			return
+		}
 
-		for (let output = 1; output <= maxOutputs; output++) {
-			this.sendCommand(this.getTieStatusQueryCommand(output))
+		const maxOutputs = this.getConfiguredOutputCount()
+		if (maxOutputs < 1) {
+			return
+		}
+
+		if (!Number.isInteger(this.nextTiePollOutput) || this.nextTiePollOutput < 1 || this.nextTiePollOutput > maxOutputs) {
+			this.nextTiePollOutput = 1
+		}
+
+		const output = this.nextTiePollOutput
+		this.sendCommand(this.getTieStatusQueryCommand(output))
+
+		this.nextTiePollOutput += 1
+		if (this.nextTiePollOutput > maxOutputs) {
+			this.nextTiePollOutput = 1
 		}
 	}
 
@@ -696,6 +664,8 @@ class ExtronXtpInstance extends InstanceBase {
 		this.login = false
 		this.verboseModeSet = false
 		this.lastVerboseModeRequest = 0
+		this.pendingTieResponseLog = undefined
+		this.nextTiePollOutput = 1
 		this.outputRouteState = {}
 		this.receiveBuffer = ''
 
@@ -742,6 +712,17 @@ class ExtronXtpInstance extends InstanceBase {
 			this.log('warn', 'Socket not connected')
 			return
 		}
+
+		this.log('debug', `Sending command: ${command}`)
+
+		if (/^\d+\*\d+[!%$]$/.test(command) || /^\d+\*[!%$]$/.test(command)) {
+			this.pendingTieResponseLog = {
+				command,
+				expiresAt: Date.now() + 5000,
+				logged: false,
+			}
+		}
+
 		this.socket.write(`${command}\n`)
 	}
 }
