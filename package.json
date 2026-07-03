@@ -1,22 +1,21 @@
 {
-	"name": "extron-xtp-3200",
+	"name": "extron-xtp-3200-feedback",
 	"version": "1.0.2",
-	"api_version": "1.0.0",
+	"main": "index.js",
+	"license": "MIT",
+	"dependencies": {
+		"@companion-module/base": "^1.12.1"
+	},
 	"keywords": [
 		"Protocol",
-		"Sis",
+		"SIS",
 		"Matrix"
 	],
-	"manufacturer": "Extron",
-	"product": "XTP II Crosspoint 3200 Matrix",
-	"shortname": "XTP 3200",
 	"description": "XTP 3200 plugin for Companion",
-	"main": "index.js",
 	"scripts": {
 		"test": "echo \"Error: no test specified\" && exit 1"
 	},
 	"author": "Jeffrey Davidsz <jeffrey.davidsz@vicreo.eu>",
-	"license": "MIT",
 	"homepage": "https://github.com/bitfocus/companion-module-extron-xtp-3200#readme",
 	"bugs": {
 		"url": "https://github.com/bitfocus/companion-module-extron-xtp-3200/issues"
@@ -24,5 +23,8 @@
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/bitfocus/companion-module-extron-xtp-3200.git"
+	},
+	"devDependencies": {
+		"@companion-module/tools": "^2.7.2"
 	}
 }
