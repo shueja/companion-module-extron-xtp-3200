@@ -264,6 +264,7 @@ class ExtronXtpInstance extends InstanceBase {
 
 	updateFeedbacks() {
 		const inputChoices = this.getInputChoices()
+		const feedbackInputChoices = [{ id: '0', label: '0: None' }, ...inputChoices]
 		const outputChoices = this.getOutputChoices()
 
 		const feedbacks = {}
@@ -280,7 +281,7 @@ class ExtronXtpInstance extends InstanceBase {
 					type: 'dropdown',
 					label: 'Input',
 					id: 'input',
-					choices: inputChoices,
+					choices: feedbackInputChoices,
 					default: inputChoices[0]?.id || '1',
 				},
 				{
@@ -400,11 +401,7 @@ class ExtronXtpInstance extends InstanceBase {
 		}
 		this.setVariableValues(updatedValues)
 
-		if (input > 0) {
-			this.outputRouteState[output] = input
-		} else {
-			delete this.outputRouteState[output]
-		}
+		this.outputRouteState[output] = input
 		this.checkFeedbacks(FEEDBACK_TIE_EXISTS)
 	}
 
