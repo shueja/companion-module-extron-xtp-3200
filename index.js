@@ -218,6 +218,7 @@ class ExtronXtpInstance extends InstanceBase {
 
 	updateActions() {
 		const inputChoices = this.getInputChoices()
+		const routeInputChoices = [{ id: '0', label: '0: None' }, ...inputChoices]
 		const outputChoices = this.getOutputChoices()
 
 		const actions = {
@@ -228,7 +229,7 @@ class ExtronXtpInstance extends InstanceBase {
 						type: 'dropdown',
 						label: 'Input',
 						id: 'input',
-						choices: inputChoices,
+						choices: routeInputChoices,
 						default: inputChoices[0]?.id || '1',
 					},
 					{
